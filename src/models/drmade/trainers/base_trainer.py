@@ -267,7 +267,8 @@ class DRMADETrainer(Trainer):
             permutation = torch.randperm(inputs.size(0), device=self.get(constants.DEVICE))
             inputs = inputs[permutation[:random_selection]]
         input_shape = self.get('train_data').input_shape()
-        mean = torch.zeros(self.get('drmade').encoder.latent_size, input_shape[0], input_shape[1], input_shape[2])
+        mean = torch.zeros(self.get('drmade').encoder.latent_size, input_shape[0], input_shape[1], input_shape[2],
+                           device=self.get(constants.DEVICE))
         count = inputs.shape[0]
         for i in range(count):
             jac = jacobian(self.get('drmade').encoder,
@@ -276,9 +277,9 @@ class DRMADETrainer(Trainer):
         total_mean = mean.mean(dim=0, keepdim=True)
         self.get('writer').add_images(f'jacobian/latent_input/{title}', mean, self.get(constants.EPOCH))
         self.get('writer').add_images(f'jacobian/latent_input/mean/{title}', total_mean, self.get(constants.EPOCH))
-        self.get('writer').add_scalars(
-            f'jacobian_norm/latent_input/{title}', {f'{i}': mean[i].norm() for i in range(mean.shape[0])},
-            self.get(constants.EPOCH))
+        # self.get('writer').add_scalars(
+        #     f'jacobian_norm/latent_input/{title}', {f'{i}': mean[i].norm() for i in range(mean.shape[0])},
+        #     self.get(constants.EPOCH))
         self.get('writer').add_scalar(
             f'jacobian_norm/latent_input/mean/{title}', total_mean.norm(), self.get(constants.EPOCH))
 
