@@ -85,5 +85,3 @@ class RobustAutoEncoderPreTrainer(DRMADETrainer):
             pgd_latent=pgd_latent,
             interval=hparams.get('validation_interval', model_config.validation_interval),
             log_interval=hparams.get('log_interval', config.log_data_feed_loop_interval)))
-
-        self.setup_writer()

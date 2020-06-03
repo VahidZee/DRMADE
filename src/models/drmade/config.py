@@ -4,7 +4,7 @@ import torch
 # models architecture
 latent_size = 16
 
-made_hidden_layers = [132, 132, 132]
+made_hidden_layers = [64, 64, 64]
 made_num_masks = 5
 made_use_biases = True
 made_natural_ordering = True
@@ -76,10 +76,11 @@ checkpoint_encoder = None
 checkpoint_decoder = None
 checkpoint_made = None
 
-evaluation_interval = 1
-validation_interval = 16
+evaluation_interval = 16
+validation_interval = 32
 embedding_interval = 512
 save_interval = 64
 num_extreme_cases = 16
 submit_latent_interval = 1
 evaluate_train_interval = 1
+track_jacobian_interval = 1

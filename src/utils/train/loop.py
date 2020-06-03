@@ -196,7 +196,7 @@ class Loop:
         data_loader = f'\t+ Data Loader: {self.data_loader}\n' if self.data_loader else ''
         log_interval = f'\t+ Log Interval: {self.log_interval}\n' if self.log_interval else ''
         optimizers = '\t+ Optimizers: [ {} ]\n'.format(
-            ','.join(optimizer for optimizer in self.optimizers)) if self.optimizers else ''
+            ', '.join(optimizer for optimizer in self.optimizers)) if self.optimizers else ''
         verbose = '\t+ Verbose\n' if self.verbose else ''
         input_transforms = '\t+ Input Transforms:\n\t\t- {}\n'.format(
             '\n\t\t- '.join(repr(transform) for transform in self.input_transforms),

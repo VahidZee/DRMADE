@@ -94,8 +94,9 @@ class Trainer:
                 f'{LEARNING_RATE_PREFIX}{self.get(f"{OPTIMIZER_PREFIX}index/{index}")}',
                 optimizer.param_groups[0]["lr"], self.context[EPOCH]
             )
-            print('\t+ optimizer', self.get(f"{OPTIMIZER_PREFIX}index/{index}"), '- lr:',
-                  optimizer.param_groups[0]["lr"])
+            if self.verbose:
+                print('\t+ optimizer', self.get(f"{OPTIMIZER_PREFIX}index/{index}"), '- lr:',
+                      optimizer.param_groups[0]["lr"])
 
     def stop_training(self):
         raise NotImplemented
@@ -109,10 +110,23 @@ class Trainer:
     def train(self):
         while not self.stop_training():
             print(f'epoch {self.context[EPOCH]:5d}')
-            for loop in self.context['loops']:
-                if loop.is_active(self.context):
-                    self.set(f'{LOOP_PREFIX}{loop.name}/data', loop(self.context), replace=True)
+
+            # loops
+            for loop in self.loops_list:
+                active = loop.is_active(self.context)
+                if self.verbose:
+                    print(f'\t+ calling loop {loop.name} - active:{active}')
+                if active:
+                    self.context[f'{LOOP_PREFIX}{loop.name}/data'] = loop(self.context)
+                    if self.verbose:
+                        print(f'\t+ submitting loop {loop.name} data')
                     loop.submit_loop_data(self.context)
+            # schedulers
+            for index, scheduler in enumerate(self.schedulers_list):
+                if self.verbose:
+                    print(f'\t+ scheduler {self.get(f"{SCHEDULER_PREFIX}index/{index}")} step')
+                scheduler.step()
+
             self.submit_progress()
             self.context[EPOCH] += 1
 
@@ -129,4 +143,4 @@ class Trainer:
             ', '.join(self.get(f'{SCHEDULER_PREFIX}index/{i}') for i in
                       range(len(self.schedulers_list)))) if self.schedulers_list else ''
         verbose = '- Verbose\n' if self.verbose else ''
-        return '{}{}{}{}{}'.format(name, optimizers, schedulers,verbose, loops)
+        return '{}{}{}{}{}'.format(name, optimizers, schedulers, verbose, loops)

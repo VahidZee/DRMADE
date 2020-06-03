@@ -1,5 +1,6 @@
 import torch as torch
 from torch.utils.tensorboard import SummaryWriter
+from torch.autograd.functional import jacobian
 from pathlib import Path
 import numpy as np
 
@@ -95,18 +96,23 @@ class DRMADETrainer(Trainer):
             context["drmade"].made.load(checkpoint_made, context[constants.DEVICE])
 
         print(f'models: {context["drmade"].name} was initialized')
-        # setting up tensorboard data summerizer
+        # setting up context name
         context['name'] = name or '{}[{}]'.format(
             hparams.get('dataset', config.dataset).__name__,
             ','.join(str(i) for i in hparams.get('normal_classes', config.normal_classes)),
         )
+        self.summarizer_ready = False
         super(DRMADETrainer, self).__init__(context['name'], context, )
 
     def setup_writer(self, output_root=None):
-        self.set('output_root', output_root if output_root else self.context[constants.HPARAMS_DICT].get(
+        if self.summarizer_ready:
+            return
+        self.summarizer_ready = True
+
+        self.set('output_root', output_root if output_root else self.get(constants.HPARAMS_DICT).get(
             'output_root', config.output_root))
         self.set('models_dir', f'{self.get("output_root")}/models')
-        self.set('check_point_saving_dir', f'{self.context["models_dir"]}/{self.context["name"]}')
+        self.set('check_point_saving_dir', f'{self.get("models_dir")}/{self.get(constants.TRAINER_NAME)}')
 
         self.set('runs_dir', f'{self.get("output_root")}/runs')
 
@@ -115,29 +121,29 @@ class DRMADETrainer(Trainer):
         Path(self.get('models_dir')).mkdir(parents=True, exist_ok=True)
         Path(self.get('check_point_saving_dir')).mkdir(parents=True, exist_ok=True)
         Path(self.get('runs_dir')).mkdir(parents=True, exist_ok=True)
-        self.set('writer', SummaryWriter(log_dir=f'{self.context["runs_dir"]}/{self.context["name"]}'))
+        self.set('writer', SummaryWriter(log_dir=f'{self.get("runs_dir")}/{self.get(constants.TRAINER_NAME)}'))
 
     def save_model(self, output_path=None):
-        output_path = output_path or self.context['check_point_saving_dir']
+        output_path = output_path or self.get('check_point_saving_dir')
         self.get('drmade').save(output_path + f'/{self.get("name")}-E{self.get("epoch")}.pth')
 
     def _evaluate_loop(self, data_loader, record_input_images=False, record_reconstructions=False):
         with torch.no_grad():
-            log_prob = torch.Tensor().to(self.context[constants.DEVICE])
-            decoder_loss = torch.Tensor().to(self.context[constants.DEVICE])
-            reconstructed_images = torch.Tensor().to(self.context[constants.DEVICE])
-            features = torch.Tensor().to(self.context[constants.DEVICE])
+            log_prob = torch.Tensor().to(self.get(constants.DEVICE))
+            decoder_loss = torch.Tensor().to(self.get(constants.DEVICE))
+            reconstructed_images = torch.Tensor().to(self.get(constants.DEVICE))
+            features = torch.Tensor().to(self.get(constants.DEVICE))
             labels = np.empty(0, dtype=np.int8)
-            input_images = torch.Tensor().to(self.context[constants.DEVICE])
+            input_images = torch.Tensor().to(self.get(constants.DEVICE))
             for batch_idx, (images, label) in enumerate(data_loader):
-                images = images.to(self.context[constants.DEVICE])
+                images = images.to(self.get(constants.DEVICE))
                 if record_input_images:
                     input_images = torch.cat((input_images, images), dim=0)
 
-                output, latent, reconstruction = self.context["drmade"](images)
+                output, latent, reconstruction = self.get("drmade")(images)
                 decoder_loss = torch.cat(
-                    (decoder_loss, self.context["drmade"].decoder.distance(images, reconstruction)), dim=0)
-                log_prob = torch.cat((log_prob, self.context["drmade"].made.log_prob_hitmap(latent).sum(1)), dim=0)
+                    (decoder_loss, self.get("drmade").decoder.distance(images, reconstruction)), dim=0)
+                log_prob = torch.cat((log_prob, self.get("drmade").made.log_prob_hitmap(latent).sum(1)), dim=0)
                 features = torch.cat((features, latent), dim=0)
 
                 if record_reconstructions:
@@ -147,12 +153,14 @@ class DRMADETrainer(Trainer):
 
     def _submit_latent(self, features, title=''):
         for i in range(features.shape[1]):
-            self.context['writer'].add_histogram(f'latent/{title}/{i}', features[:, i], self.context["epoch"])
+            self.get('writer').add_histogram(f'latent/{title}/{i}', features[:, i], self.get(constants.EPOCH))
 
-    def _submit_extreme_reconstructions(self, input_images, reconstructed_images, decoder_loss, title=''):
-        num_cases = self.context[constants.HPARAMS_DICT].get('num_extreme_cases', config.num_extreme_cases)
-        distance_hitmap = self.context['drmade'].decoder.distance_hitmap(input_images,
-                                                                         reconstructed_images).detach().cpu().numpy()
+    def _submit_extreme_reconstructions(
+            self, input_images, reconstructed_images, decoder_loss, title='', num_cases=None):
+        num_cases = num_cases or self.get(constants.HPARAMS_DICT).get('num_extreme_cases',
+                                                                      model_config.num_extreme_cases)
+        distance_hitmap = self.get('drmade').decoder.distance_hitmap(input_images,
+                                                                     reconstructed_images).detach().cpu().numpy()
 
         distance = decoder_loss.detach().cpu().numpy()
         sorted_indexes = np.argsort(distance)
@@ -163,106 +171,153 @@ class DRMADETrainer(Trainer):
             result_images[i * 3] = input_images[index]
             result_images[i * 3 + 1] = reconstructed_images[index]
             result_images[i * 3 + 2] = distance_hitmap[index]
-        self.context['writer'].add_images(f'best_reconstruction/{title}', result_images, self.context['epoch'])
+        self.get('writer').add_images(f'best_reconstruction/{title}', result_images, self.get(constants.EPOCH))
 
         result_images = np.empty((num_cases * 3, input_images.shape[1], input_images.shape[2], input_images.shape[3]))
         for i, index in enumerate(sorted_indexes[-1:-(num_cases + 1):-1]):
             result_images[i * 3] = input_images[index]
             result_images[i * 3 + 1] = reconstructed_images[index]
             result_images[i * 3 + 2] = distance_hitmap[index]
-        self.context['writer'].add_images(f'worst_reconstruction/{title}', result_images, self.context['epoch'])
 
-    def evaluate(self, ):
+        self.get('writer').add_images(f'worst_reconstruction/{title}', result_images, self.get(constants.EPOCH))
+
+    def evaluate(self, evaluation_interval=1):
+        self.setup_writer()  # in case it hasn't already been setup
+
         self.get('drmade').eval()
-        record_extreme_cases = self.get(constants.HPARAMS_DICT).get('num_extreme_cases', model_config.num_extreme_cases)
-        submit_latent_interval = self.get(constants.HPARAMS_DICT).get(
-            'submit_latent_interval', model_config.submit_latent_interval)
-        evaluate_train_interval = self.get(constants.HPARAMS_DICT).get(
-            'evaluate_train_interval', model_config.evaluate_train_interval)
+
+        # variables
+        epoch = self.get(constants.EPOCH)
+        hparams = self.get(constants.HPARAMS_DICT)
+
+        num_extreme_cases = hparams.get('num_extreme_cases', model_config.num_extreme_cases)
+        track_extreme_reconstructions = num_extreme_cases and hparams.get('track_extreme_reconstructions',
+                                                                          model_config.num_extreme_cases)
+        track_jacobian_interval = hparams.get('track_jacobian_interval', model_config.track_jacobian_interval)
+        track_jacobian_random_selection = hparams.get('track_jacobian_random_selection', None)
+        track_jacobian = track_jacobian_interval and ((epoch // evaluation_interval) % track_jacobian_interval == 0)
+
+        submit_latent_interval = hparams.get('submit_latent_interval', model_config.submit_latent_interval)
+        submit_latent = submit_latent_interval and (epoch // evaluation_interval) % submit_latent_interval == 0
+
+        evaluate_train_interval = hparams.get('evaluate_train_interval', model_config.evaluate_train_interval)
+
+        # evaluate test data
         log_prob, decoder_loss, features, labels, images, reconstruction = self._evaluate_loop(
-            self.context['test_loader'], record_extreme_cases, record_extreme_cases)
+            self.get('test_loader'), track_jacobian or track_extreme_reconstructions, track_extreme_reconstructions)
 
-        self.context['writer'].add_scalar(
+        # auc calculation
+        self.get('writer').add_scalar(
             f'auc/decoder',
-            roc_auc_score(y_true=np.isin(labels, self.context['normal_classes']).astype(np.int8),
-                          y_score=(-decoder_loss).cpu()), self.context["epoch"])
-        self.context['writer'].add_scalar(
+            roc_auc_score(y_true=np.isin(labels, self.get('normal_classes')).astype(np.int8),
+                          y_score=(-decoder_loss).cpu()),
+            epoch)
+        self.get('writer').add_scalar(
             f'auc/made',
-            roc_auc_score(y_true=np.isin(labels, self.context['normal_classes']).astype(np.int8),
-                          y_score=log_prob.cpu()), self.context["epoch"])
-        anomaly_indexes = (
-                np.isin(labels, self.context[constants.HPARAMS_DICT].get('normal_classes',
-                                                                         self.context['normal_classes'])) == False)
-        self.context['writer'].add_histogram(f'loss/decoder/test/anomaly',
-                                             decoder_loss[anomaly_indexes], self.context["epoch"])
-        self.context['writer'].add_histogram(f'loss/decoder/test/normal',
-                                             decoder_loss[(anomaly_indexes == False)],
-                                             self.context["epoch"])
+            roc_auc_score(y_true=np.isin(labels, self.get('normal_classes')).astype(np.int8), y_score=log_prob.cpu()),
+            epoch)
 
-        self.context['writer'].add_histogram(f'loss/made/anomaly',
-                                             log_prob[anomaly_indexes], self.context["epoch"])
-        self.context['writer'].add_histogram(f'loss/made/normal',
-                                             log_prob[(anomaly_indexes == False)],
-                                             self.context["epoch"])
+        anomaly_indexes = (np.isin(labels, hparams.get('normal_classes', self.get('normal_classes'))) == False)
 
-        if record_extreme_cases:
+        # loss histograms
+        self.get('writer').add_histogram(f'loss/decoder/test/anomaly', decoder_loss[anomaly_indexes], epoch)
+        self.get('writer').add_histogram(f'loss/decoder/test/normal', decoder_loss[(anomaly_indexes == False)], epoch)
+
+        self.get('writer').add_histogram(f'loss/made/anomaly', log_prob[anomaly_indexes], epoch)
+        self.get('writer').add_histogram(f'loss/made/normal', log_prob[(anomaly_indexes == False)], epoch)
+
+        if track_extreme_reconstructions:
             self._submit_extreme_reconstructions(
                 images[anomaly_indexes], reconstruction[anomaly_indexes], decoder_loss[anomaly_indexes],
-                'test/anomaly')
+                'test/anomaly', num_extreme_cases)
             self._submit_extreme_reconstructions(
                 images[(anomaly_indexes == False)], reconstruction[(anomaly_indexes == False)],
-                decoder_loss[(anomaly_indexes == False)], 'test/normal')
+                decoder_loss[(anomaly_indexes == False)], 'test/normal', num_extreme_cases)
 
-        if submit_latent_interval and self.get(constants.EPOCH) % submit_latent_interval == 0:
+        if submit_latent:
             self._submit_latent(features[anomaly_indexes], 'test/anomaly')
             self._submit_latent(features[(anomaly_indexes == False)], 'test/normal')
 
-        if evaluate_train_interval and self.get(constants.EPOCH) % evaluate_train_interval == 0:
-            log_prob, decoder_loss, features, labels, images, reconstruction = self._evaluate_loop(
-                self.context['train_loader'], record_extreme_cases, record_extreme_cases)
+        if track_jacobian:
+            self._track_jacobian(images[anomaly_indexes], 'test/anomaly', track_jacobian_random_selection)
+            self._track_jacobian(images[(anomaly_indexes == False)], 'test/normal', track_jacobian_random_selection)
 
-            self.context['writer'].add_histogram(f'loss/decoder/train',
-                                                 decoder_loss, self.context["epoch"])
-            self.context['writer'].add_histogram(f'loss/made/train',
-                                                 log_prob, self.context["epoch"])
-            if submit_latent_interval and self.get(constants.EPOCH) % submit_latent_interval == 0:
+        if evaluate_train_interval and (epoch // evaluation_interval) % evaluate_train_interval == 0:
+            log_prob, decoder_loss, features, labels, images, reconstruction = self._evaluate_loop(
+                self.get('train_loader'), track_jacobian or track_extreme_reconstructions,
+                track_extreme_reconstructions)
+
+            self.get('writer').add_histogram(f'loss/decoder/train', decoder_loss, epoch)
+            self.get('writer').add_histogram(f'loss/made/train', log_prob, epoch)
+
+            if submit_latent:
                 self._submit_latent(features, 'train')
 
-            if record_extreme_cases:
-                self._submit_extreme_reconstructions(images, reconstruction, decoder_loss, 'train')
-        self.context['writer'].flush()
+            if track_extreme_reconstructions:
+                self._submit_extreme_reconstructions(images, reconstruction, decoder_loss, 'train', num_extreme_cases)
+
+            if track_jacobian:
+                self._track_jacobian(images, 'train', track_jacobian_random_selection)
+
+        self.get('writer').flush()
         self.get('drmade').train()
 
-    def submit_embedding(self):
+    def _track_jacobian(self, inputs, title='', random_selection=None):
+        if random_selection:
+            permutation = torch.randperm(inputs.size(0), device=self.get(constants.DEVICE))
+            inputs = inputs[permutation[:random_selection]]
+        input_shape = self.get('train_data').input_shape()
+        mean = torch.zeros(self.get('drmade').encoder.latent_size, input_shape[0], input_shape[1], input_shape[2])
+        count = inputs.shape[0]
+        for i in range(count):
+            jac = jacobian(self.get('drmade').encoder,
+                           inputs[i].view(-1, input_shape[0], input_shape[1], input_shape[2]))[0, :, 0]
+            mean += jac / count
+        total_mean = mean.mean(dim=0, keepdim=True)
+        self.get('writer').add_images(f'jacobian/latent_input/{title}', mean, self.get(constants.EPOCH))
+        self.get('writer').add_images(f'jacobian/latent_input/mean/{title}', total_mean, self.get(constants.EPOCH))
+        self.get('writer').add_scalars(
+            f'jacobian_norm/latent_input/{title}', {f'{i}': mean[i].norm() for i in range(mean.shape[0])},
+            self.get(constants.EPOCH))
+        self.get('writer').add_scalar(
+            f'jacobian_norm/latent_input/mean/{title}', total_mean.norm(), self.get(constants.EPOCH))
+
+    def submit_embedding(self, data_loader='test_loader'):
+        self.setup_writer()  # in case it hasn't already been setup
+
         log_prob, decoder_loss, features, labels, images, reconstruction = self._evaluate_loop(
-            self.context['test_loader'],
+            self.get(data_loader),
             record_input_images=True,
         )
-        self.context['writer'].add_embedding(
+        self.get('writer').add_embedding(
             features, metadata=labels, label_img=images,
-            global_step=self.context['epoch'],
-            tag=self.context['name'])
-        self.context['writer'].flush()
+            global_step=self.get(constants.EPOCH),
+            tag=self.get(constants.TRAINER_NAME))
+        self.get('writer').flush()
 
     def train(self):
-        evaluation_interval = self.context[constants.HPARAMS_DICT].get(
+        self.setup_writer()  # in case it hasn't already been setup
+
+        # training hyper parameters
+        evaluation_interval = self.get(constants.HPARAMS_DICT).get(
             'evaluation_interval', model_config.evaluation_interval)
-        embedding_interval = self.context[constants.HPARAMS_DICT].get(
+        embedding_interval = self.get(constants.HPARAMS_DICT).get(
             'embedding_interval', model_config.embedding_interval)
-        save_interval = self.context[constants.HPARAMS_DICT].get('save_interval', model_config.save_interval)
-        start_epoch = self.context[constants.HPARAMS_DICT].get('start_epoch', 0)
-        max_epoch = self.context[constants.HPARAMS_DICT].get('max_epoch', model_config.max_epoch)
+        save_interval = self.get(constants.HPARAMS_DICT).get('save_interval', model_config.save_interval)
+        start_epoch = self.get(constants.HPARAMS_DICT).get('start_epoch', 0)
+        max_epoch = self.get(constants.HPARAMS_DICT).get('max_epoch', model_config.max_epoch)
+
         print('Starting Training - intervals:[',
               'evaluation:{}, embedding:{}, save:{}, start_epoch:{}, max_epoch:{} ]'.format(
                   evaluation_interval, embedding_interval, save_interval, start_epoch, max_epoch))
 
         for epoch in range(start_epoch, max_epoch):
-            self.context[constants.EPOCH] = epoch
-            print(f'epoch {self.context[constants.EPOCH]:5d}')
+            self.set(constants.EPOCH, epoch, replace=True)
+            print(f'epoch {self.get(constants.EPOCH):5d}')
             if evaluation_interval and epoch % evaluation_interval == 0:
                 if self.verbose:
                     print('\t+ evaluating')
-                self.evaluate()
+                self.evaluate(evaluation_interval)
 
             if embedding_interval and (epoch + 1) % embedding_interval == 0:
                 if self.verbose:
@@ -277,7 +332,7 @@ class DRMADETrainer(Trainer):
                 if self.verbose:
                     print(f'\t+ calling loop {loop.name} - active:{active}')
                 if active:
-                    self.context[f'{constants.LOOP_PREFIX}{loop.name}/data'] = loop(self.context)
+                    self.set(f'{constants.LOOP_PREFIX}{loop.name}/data', loop(self.context), replace=True)
                     if self.verbose:
                         print(f'\t+ submitting loop {loop.name} data')
                     loop.submit_loop_data(self.context)

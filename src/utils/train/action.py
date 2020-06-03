@@ -4,7 +4,7 @@ from .constants import *
 from collections.abc import Iterable
 
 
-class Action:  # returns a single factor of loss / new_context (   input or ...
+class Action:  # returns a single factor of loss  (   input or ...
     def __init__(
             self,
             name,
@@ -109,3 +109,40 @@ class Action:  # returns a single factor of loss / new_context (   input or ...
             f'factor:{factor}, ' if factor else '',
             'verbose' if self.verbose else '',
         )
+
+
+# todo
+class ContextAction:
+    def __init__(self, name, active=True, verbose=False, action_function=None, trainer=None, loop=None):
+        self.name = name
+        self.verbose = verbose
+        self.active = active
+        self.action_function = action_function
+        self.trainer = trainer
+        self.loop = loop
+
+    def toggle_verbose(self, force=None):
+        self.verbose = not self.verbose if force is None else force
+        return self.verbose
+
+    def is_active(self, trainer=None, loop=None, **kwargs):
+        trainer = trainer or self.trainer
+        loop = loop or self.loop
+
+        active = kwargs.get('active', self.active)
+        if callable(active):
+            return active(trainer=trainer, loop=loop, **kwargs)
+        return active
+
+    def action(self, trainer=None, loop=None, *args, **kwargs):
+        trainer = trainer or self.trainer
+        loop = loop or self.loop
+
+        if callable(self.action_function):
+            return self.action_function(trainer, loop, *args, **kwargs)
+        raise NotImplemented
+
+    def __call__(self, trainer=None, loop=None, *args, **kwargs):
+        trainer = trainer or self.trainer
+        loop = loop or self.loop
+        return self.action(trainer, loop, *args, **kwargs)
