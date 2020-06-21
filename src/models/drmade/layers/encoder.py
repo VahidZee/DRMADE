@@ -38,13 +38,14 @@ class Encoder(nn.Module):
         self.bn_affine = bn_affine
         self.bn_eps = bn_eps
 
-        self.name = name or 'Encoder{}{}{}-{}{}{}'.format(
+        self.name = name or 'Encoder{}{}{}-{}{}{}{}'.format(
             self.num_layers,
             self.layers_activation,
             'bn_affine' if bn_affine else '',
             self.latent_size,
             self.latent_activation,
             'bn' if self.bn_latent else '',
+            '(bias)' if self.bias else '',
         ) if not name else name
         self.model_generator_function = model_generator_function
 

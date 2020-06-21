@@ -86,16 +86,19 @@ class DRMADETrainer(Trainer):
             distribution=hparams.get('distribution', model_config.distribution),
             parameters_transform=hparams.get('parameters_transform', model_config.parameters_transform),
             parameters_min=hparams.get('parameters_min_value', model_config.paramteres_min_value),
+            made_use_bias=hparams.get('made_use_bias', model_config.made_use_biases),
             encoder=encoder,
             encoder_num_layers=hparams.get('encoder_num_layers', model_config.encoder_num_layers),
             encoder_layers_activation=hparams.get('encoder_layers_activation', model_config.encoder_layers_activation),
             encoder_latent_activation=hparams.get('encoder_latent_activation', model_config.encoder_latent_activation),
             encoder_latent_bn=hparams.get('encoder_bn_latent', model_config.encoder_bn_latent),
+            encoder_use_bias=hparams.get('encoder_use_bias', model_config.encoder_use_bias),
             encoder_generator_function=hparams.get('encoder_generator_function', None),
             decoder=decoder,
             decoder_num_layers=hparams.get('decoder_num_layers', model_config.decoder_num_layers),
             decoder_layers_activation=hparams.get('decoder_layers_activation', model_config.decoder_layers_activation),
             decoder_output_activation=hparams.get('decoder_output_activation', model_config.decoder_output_activation),
+            decoder_use_bias=hparams.get('decoder_use_bias', model_config.decoder_use_bias),
         ).to(context[constants.DEVICE])
         drmade.encoder = drmade.encoder.to(context[constants.DEVICE])
         drmade.made = drmade.made.to(context[constants.DEVICE])
@@ -312,7 +315,8 @@ class DRMADETrainer(Trainer):
         total_mean_picture = total_mean - total_mean.min()
         total_mean_picture = total_mean_picture / total_mean.max()
         if not torch.isnan(mean_picture).sum():
-            self.get('writer').add_images(f'jacobian/latent_input/mean/{title}', total_mean_picture, self.get(constants.EPOCH))
+            self.get('writer').add_images(f'jacobian/latent_input/mean/{title}', total_mean_picture,
+                                          self.get(constants.EPOCH))
         # self.get('writer').add_scalars(
         #     f'jacobian_norm/latent_input/{title}', {f'{i}': mean[i].norm() for i in range(mean.shape[0])},
         #     self.get(constants.EPOCH))

@@ -21,16 +21,19 @@ class DRMADE(nn.Module):
             distribution=model_config.distribution,
             parameters_transform=model_config.parameters_transform,
             parameters_min=model_config.paramteres_min_value,
+            made_use_bias=model_config.made_use_biases,
             encoder=None,
             encoder_num_layers=model_config.encoder_num_layers,
             encoder_layers_activation=model_config.encoder_layers_activation,
             encoder_latent_activation=model_config.encoder_latent_activation,
             encoder_latent_bn=model_config.encoder_bn_latent,
+            encoder_use_bias=model_config.encoder_use_bias,
             encoder_generator_function=None,
             decoder=None,
             decoder_num_layers=model_config.decoder_num_layers,
             decoder_layers_activation=model_config.decoder_layers_activation,
             decoder_output_activation=model_config.decoder_output_activation,
+            decoder_use_bias=model_config.decoder_use_bias,
             name=None,
             **kwargs,
     ):
@@ -47,6 +50,7 @@ class DRMADE(nn.Module):
             latent_activation=encoder_latent_activation,
             bn_latent=encoder_latent_bn,
             model_generator_function=encoder_generator_function,
+            bias=encoder_use_bias
         )
         self.decoder = decoder or Decoder(
             output_shape=input_shape,
@@ -54,6 +58,7 @@ class DRMADE(nn.Module):
             num_layers=decoder_num_layers,
             layers_activation=decoder_layers_activation,
             output_activation=decoder_output_activation,
+            bias=decoder_use_bias
         )
         self.made = made or MADE(
             nin=latent_size,
@@ -64,6 +69,7 @@ class DRMADE(nn.Module):
             distribution=distribution,
             parameters_transform=parameters_transform,
             parameters_min=parameters_min,
+            bias=made_use_bias,
             num_mix=num_mix,
         )
 

@@ -48,11 +48,12 @@ class Decoder(nn.Module):
                 latent_size // (self.latent_image_size * self.latent_image_size) + 1) if latent_size % (
                 self.latent_image_size * self.latent_image_size) != 0 else (
                 latent_size // (self.latent_image_size * self.latent_image_size))
-        self.name = 'Decoder{}{}{}-{}'.format(
+        self.name = 'Decoder{}{}{}-{}{}'.format(
             self.num_layers,
             self.layers_activation,
             'bn_affine' if bn_affine else '',
             self.output_activation,
+            '(bias)' if self.bias else ''
         ) if not name else name
 
         self.model = nn.Sequential()

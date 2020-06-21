@@ -72,12 +72,13 @@ class MADE(nn.Module):
                                                          self.num_dist_parameters + 1),
                                                  self.nin)]
 
-        self.name = 'MADEhl=[{}]-nmasks={}-dist={},nmix={},pmin=[{}]'.format(
+        self.name = 'MADEhl=[{}]-nmasks={}-dist={},nmix={},pmin=[{}]{}'.format(
             ','.join(str(i) for i in hidden_sizes),
             self.num_masks,
             self.distribution.__name__,
             self.num_mix,
             ','.join(str(i) for i in self.parameters_min),
+            '(bias)' if self.bias else '',
         ) if not name else name
 
         # define a simple MLP neural net
