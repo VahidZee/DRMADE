@@ -1,5 +1,8 @@
 import numpy as np
 
+import inspect
+import dill
+
 import torch
 import torch.nn as nn
 
@@ -12,7 +15,6 @@ class MADE(nn.Module):
             self,
             nin,
             hidden_sizes,
-            nout,
             num_masks=model_config.made_num_masks,
             bias=model_config.made_use_biases,
             natural_ordering=model_config.made_natural_ordering,
@@ -21,32 +23,47 @@ class MADE(nn.Module):
             parameters_transform=model_config.parameters_transform,
             parameters_min=model_config.paramteres_min_value,
             num_mix=model_config.num_mix,
+            seed=0,
             name=None,
+            **kwargs
     ):
         """
         nin: integer; number of inputs
         hidden sizes: a list of integers; number of units in hidden layers
-        nout: integer; number of outputs, which usually collectively parameterize some kind of 1D distribution
-              note: if nout is e.g. 2x larger than nin (perhaps the mean and std), then the first nin
-              will be all the means and the second nin will be stds. i.e. output dimensions depend on the
-              same input dimensions in "chunks" and should be carefully decoded downstream appropriately.
-              the output of running the tests for this file makes this a bit more clear with examples.
         num_masks: can be used to drmade ensemble over orderings/connections
         natural_ordering: force natural ordering of dimensions, don'torch use random permutations
         """
 
         super().__init__()
-        assert nout % nin == 0, "nout must be integer multiple of nin"
 
         self.nin = nin
-        self.nout = nout
+        self.nout = nin * (num_dist_parameters if num_mix == 1 else 1 + num_dist_parameters) * num_mix
+        assert self.nout % self.nin == 0, "nout must be integer multiple of nin"
+
         self.hidden_sizes = hidden_sizes
-        self.distribution = distribution
-        self.parameters_min = parameters_min
+
         self.num_dist_parameters = num_dist_parameters
-        self.parameters_transform = parameters_transform
+        if inspect.isclass(distribution):
+            self.distribution = distribution
+            self.distribution_lambda = lambda: distribution
+        else:
+            self.distribution = distribution()
+            self.distribution_lambda = distribution
+
+        self.parameters_min = parameters_min
+        assert len(self.parameters_min) == self.num_dist_parameters, 'wrong number of parameter minimum'
+
+        if callable(parameters_transform):
+            self.parameters_transform = parameters_transform()
+            self.parameters_transform_lambda = parameters_transform
+        else:
+            self.parameters_transform = parameters_transform()
+            self.parameters_transform_lambda = lambda: parameters_transform
+        assert len(self.parameters_transform) == self.num_dist_parameters, 'wrong number of parameter transforms'
+
         self.num_mix = num_mix
         self.num_masks = num_masks
+        self.bias = bias
         self._feature_perm_indexes = [j for i in range(self.nin) for j in
                                       range(i, self.nin * self.num_mix, self.nin)]
         self._log_mix_coef_perm_indexes = [j for i in range(self.nin) for j in
@@ -65,7 +82,7 @@ class MADE(nn.Module):
 
         # define a simple MLP neural net
         self.net = []
-        hs = [nin] + hidden_sizes + [nout]
+        hs = [nin] + hidden_sizes + [self.nout]
         for h0, h1 in zip(hs, hs[1:]):
             self.net.extend([
                 MaskedLinear(h0, h1, bias),
@@ -77,7 +94,7 @@ class MADE(nn.Module):
         # seeds for orders/connectivities of the models ensemble
         self.natural_ordering = natural_ordering
         self.num_masks = num_masks
-        self.seed = 0  # for cycling through num_masks orderings
+        self.seed = seed  # for cycling through num_masks orderings
 
         self.m = {}
         self.update_masks()  # builds the initial self.m connectivity
@@ -200,16 +217,31 @@ class MADE(nn.Module):
             self.update_masks()
         return result / self.num_masks
 
-    def load(self, path, device=None):
-        params = torch.load(path) if not device else torch.load(path, map_location=device)
+    @staticmethod
+    def load_from_checkpoint(path=None, checkpoint=None):
+        assert path is not None or checkpoint is not None, 'missing checkpoint source (path/checkpoint_dict)'
+        checkpoint = checkpoint or torch.load(path)
+        state_dict = checkpoint['state_dict']
+        checkpoint['distribution'] = dill.loads(checkpoint['distribution'])
+        checkpoint['parameters_transform'] = dill.loads(checkpoint['parameters_transform'])
+        instance = MADE(**checkpoint)
+        instance.load_state_dict(state_dict, strict=True)
+        print('made loaded from', path or 'checkpoint_dict')
+        return instance
 
-        added = 0
-        for name, param in params.items():
-            if name in self.state_dict().keys():
-                try:
-                    self.state_dict()[name].copy_(param)
-                    added += 1
-                except Exception as e:
-                    print(e)
-                    pass
-        print('loaded {:.2f}% of params made'.format(100 * added / float(len(self.state_dict().keys()))))
+    def checkpoint_dict(self):
+        return {
+            'state_dict': self.state_dict(),
+            'nin': self.nin,
+            'hidden_sizes': self.hidden_sizes,
+            'distribution': dill.dumps(self.distribution_lambda),
+            'parameters_min': self.parameters_min,
+            'num_dist_parameters': self.num_dist_parameters,
+            'parameters_transform': dill.dumps(self.parameters_transform_lambda),
+            'num_mix': self.num_mix,
+            'num_masks': self.num_masks,
+            'natural_ordering': self.natural_ordering,
+            'bias': self.bias,
+            'seed': self.seed,
+            'name': self.name,
+        }

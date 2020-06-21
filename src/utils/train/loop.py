@@ -102,7 +102,7 @@ class Loop:
         with torch.set_grad_enabled(not self.no_grad_active(context, **kwargs)):
             for batch_idx, (inputs, outputs) in enumerate(data_loader):
                 if self.verbose:
-                    print(f'\tbidx:{batch_idx}/{len(data_loader)} - converting inputs to {device}')
+                    print(f'\tbidx:{batch_idx + 1}/{len(data_loader)} - converting inputs to {device}')
                 inputs = inputs.to(device)
                 loop_data['inputs'] = inputs
                 loop_data['outputs'] = outputs

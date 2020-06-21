@@ -2,6 +2,7 @@ from .constants import *
 
 import tensorflow as tf
 import tensorboard as tb
+import torch
 
 tf.io.gfile = tb.compat.tensorflow_stub.io.gfile
 
@@ -14,6 +15,7 @@ class Trainer:
             loops=tuple(),
             schedulers: dict = None,
             optimizers: dict = None,
+            models: dict = None,
             verbose: bool = False,
     ):
         self.context = context or dict()
@@ -36,6 +38,12 @@ class Trainer:
         if schedulers:
             for name, scheduler in schedulers.items():
                 self.add_scheduler(name, scheduler)
+
+        self.models = self.context[MODEL_NAMES_LIST] = list()
+        if models:
+            for name, model in models.items():
+                self.add_model(name, model)
+
         self.verbose = verbose
 
     def add_loop(self, loop, replace=False):
@@ -74,9 +82,17 @@ class Trainer:
             self.set(f'{SCHEDULER_PREFIX}index/{len(self.schedulers_list)}', name)
             self.schedulers_list.append(scheduler)
 
-    def get(self, item, prefix=None, **kwargs):
-        if 'default' in kwargs:
-            return self.context.get(item if prefix is None else f'{prefix}{item}', kwargs['default'])
+    def add_model(self, name, model, replace=False):
+        assert replace or name not in self.models, \
+            f'Trainer {self.get(TRAINER_NAME)} - model "{name}" already exists'
+        if not replace:
+            self.models.append(name)
+        self.set(name, model, replace)
+
+    def get(self, item, *args, prefix=None, **kwargs):
+        if 'default' in kwargs or args:
+            default = kwargs.get('default', None) if len(args) != 1 else args[0]
+            return self.context.get(item if prefix is None else f'{prefix}{item}', default)
         if not prefix:
             assert item in self.context, f'Trainer {self.get(TRAINER_NAME)} - context does not have "{item}"'
             return self.context[item]
@@ -87,6 +103,27 @@ class Trainer:
         assert replace or f'{name}' not in self.context, \
             f'Trainer {self.get(TRAINER_NAME)} - "{name}" already exists in context'
         self.context[name] = value
+
+    def checkpoint_dict(self):
+        checkpoint = dict()
+        checkpoint['schedulers'] = {
+            self.get(f'{SCHEDULER_PREFIX}index/{index}'): scheduler.state_dict() for index, scheduler in
+            enumerate(self.schedulers_list)
+        }
+        checkpoint['optimizers'] = {
+            self.get(f'{OPTIMIZER_PREFIX}index/{index}'): optimizer.state_dict() for index, optimizer in
+            enumerate(self.optimizers_list)
+        }
+        checkpoint['models'] = {
+            model: self.get(model).state_dict() if not hasattr(self.get(model), 'checkpoint_dict') else self.get(
+                model).checkpoint_dict() for model in self.models
+        }
+        checkpoint[EPOCH] = self.get(EPOCH, None)
+        checkpoint[HPARAMS_DICT] = self.get(HPARAMS_DICT, None)
+        return checkpoint
+
+    def save_checkpoint(self, path):
+        torch.save(self.checkpoint_dict(), path)
 
     def submit_progress(self):
         for index, optimizer in enumerate(self.optimizers_list):

@@ -8,6 +8,7 @@ LOOP_PREFIX = 'loop/'
 LOOPS_LIST = 'loops_list'
 SCHEDULERS_LIST = 'schedulers_list'
 OPTIMIZERS_LIST = 'optimizers_list'
+MODEL_NAMES_LIST = 'model_names_list'
 
 RESULT_PREFIX = 'result/'
 SCALAR_PREFIX = 'scalar/'

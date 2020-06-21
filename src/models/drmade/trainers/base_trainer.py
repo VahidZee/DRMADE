@@ -6,7 +6,7 @@ import numpy as np
 
 from sklearn.metrics import roc_auc_score
 from src.utils.data import DatasetSelection
-from src.models.drmade.model import DRMADE
+from src.models.drmade.model import DRMADE, Encoder, Decoder, MADE
 import src.config as config
 
 from src.utils.train import Trainer
@@ -15,18 +15,14 @@ import src.models.drmade.config as model_config
 
 
 class DRMADETrainer(Trainer):
-    def __init__(
-            self,
-            hparams: dict = None,
-            name='',
-            drmade=None,
-            device=None,
-    ):
+    def __init__(self, hparams: dict = None, name='', drmade=None, device=None, checkpoint_path=None):
+        if checkpoint_path:
+            self.load_checkpoint(checkpoint_path)
+            return
         # reproducibility
         torch.manual_seed(config.seed)
         np.random.seed(config.seed)
         torch.set_default_tensor_type('torch.FloatTensor')
-
         context = dict()
         hparams = hparams or dict()
         context[constants.HPARAMS_DICT] = hparams
@@ -58,10 +54,30 @@ class DRMADETrainer(Trainer):
             shuffle=False, batch_size=hparams.get('test_batch_size', config.test_batch_size))
 
         print('initializing models')
-        context['drmade'] = drmade or DRMADE(
-            input_size=context["input_shape"][1],
-            num_channels=context["input_shape"][0],
+        checkpoint_encoder = hparams.get('checkpoint_encoder', model_config.checkpoint_encoder)
+        encoder = hparams.get('encoder', None)
+        if checkpoint_encoder:
+            encoder = Encoder.load_from_checkpoint(checkpoint_encoder, hparams.get('checkpoint_encoder_dict', None))
+
+        decoder = hparams.get('decoder', None)
+        checkpoint_decoder = hparams.get('checkpoint_decoder', model_config.checkpoint_drmade)
+        if checkpoint_decoder:
+            decoder = Decoder.load_from_checkpoint(checkpoint_decoder, hparams.get('checkpoint_decoder_dict', None))
+
+        made = hparams.get('made', None)
+        checkpoint_made = hparams.get('checkpoint_made', model_config.checkpoint_drmade)
+        if checkpoint_made:
+            made = MADE.load_from_checkpoint(checkpoint_made, hparams.get('checkpoint_made_dict', None))
+
+        drmade = hparams.get('drmade', drmade)
+        checkpoint_drmade = hparams.get('checkpoint_drmade', model_config.checkpoint_drmade)
+        if checkpoint_drmade:
+            drmade = DRMADE.load_from_checkpoint(checkpoint_made, hparams.get('checkpoint_drmade_dict', None))
+
+        drmade = drmade or DRMADE(
+            input_shape=context["input_shape"],
             latent_size=hparams.get('latent_size', model_config.latent_size),
+            made=made,
             made_hidden_layers=hparams.get('made_hidden_layers', model_config.made_hidden_layers),
             made_natural_ordering=hparams.get('made_natural_ordering', model_config.made_natural_ordering),
             num_masks=hparams.get('made_num_masks', model_config.made_num_masks),
@@ -70,45 +86,31 @@ class DRMADETrainer(Trainer):
             distribution=hparams.get('distribution', model_config.distribution),
             parameters_transform=hparams.get('parameters_transform', model_config.parameters_transform),
             parameters_min=hparams.get('parameters_min_value', model_config.paramteres_min_value),
+            encoder=encoder,
             encoder_num_layers=hparams.get('encoder_num_layers', model_config.encoder_num_layers),
             encoder_layers_activation=hparams.get('encoder_layers_activation', model_config.encoder_layers_activation),
             encoder_latent_activation=hparams.get('encoder_latent_activation', model_config.encoder_latent_activation),
             encoder_latent_bn=hparams.get('encoder_bn_latent', model_config.encoder_bn_latent),
+            encoder_generator_function=hparams.get('encoder_generator_function', None),
+            decoder=decoder,
             decoder_num_layers=hparams.get('decoder_num_layers', model_config.decoder_num_layers),
             decoder_layers_activation=hparams.get('decoder_layers_activation', model_config.decoder_layers_activation),
             decoder_output_activation=hparams.get('decoder_output_activation', model_config.decoder_output_activation),
         ).to(context[constants.DEVICE])
-        context["drmade"].encoder = context["drmade"].encoder.to(context[constants.DEVICE])
-        context["drmade"].made = context["drmade"].made.to(context[constants.DEVICE])
-        context["drmade"].decoder = context["drmade"].decoder.to(context[constants.DEVICE])
+        drmade.encoder = drmade.encoder.to(context[constants.DEVICE])
+        drmade.made = drmade.made.to(context[constants.DEVICE])
+        drmade.decoder = drmade.decoder.to(context[constants.DEVICE])
 
-        checkpoint_drmade = hparams.get('checkpoint_drmade', model_config.checkpoint_drmade)
-        if checkpoint_drmade:
-            context["drmade"].load(checkpoint_drmade, context[constants.DEVICE])
-        checkpoint_encoder = hparams.get('checkpoint_encoder', model_config.checkpoint_encoder)
-        if checkpoint_encoder:
-            context["drmade"].encoder.load(checkpoint_encoder, context[constants.DEVICE])
-        checkpoint_decoder = hparams.get('checkpoint_decoder', model_config.checkpoint_drmade)
-        if checkpoint_decoder:
-            context["drmade"].decoder.load(checkpoint_decoder, context[constants.DEVICE])
-        checkpoint_made = hparams.get('checkpoint_made', model_config.checkpoint_drmade)
-        if checkpoint_made:
-            context["drmade"].made.load(checkpoint_made, context[constants.DEVICE])
-
-        print(f'models: {context["drmade"].name} was initialized')
+        print(f'models: {drmade.name} was initialized')
         # setting up context name
-        context['name'] = name or '{}[{}]'.format(
+        name = name or '{}[{}]'.format(
             hparams.get('dataset', config.dataset).__name__,
             ','.join(str(i) for i in hparams.get('normal_classes', config.normal_classes)),
         )
         self.summarizer_ready = False
-        super(DRMADETrainer, self).__init__(context['name'], context, )
+        super().__init__(name, context, models={'drmade': drmade})
 
-    def setup_writer(self, output_root=None):
-        if self.summarizer_ready:
-            return
-        self.summarizer_ready = True
-
+    def setup_output_directories(self, output_root=None):
         self.set('output_root', output_root if output_root else self.get(constants.HPARAMS_DICT).get(
             'output_root', config.output_root))
         self.set('models_dir', f'{self.get("output_root")}/models')
@@ -121,7 +123,34 @@ class DRMADETrainer(Trainer):
         Path(self.get('models_dir')).mkdir(parents=True, exist_ok=True)
         Path(self.get('check_point_saving_dir')).mkdir(parents=True, exist_ok=True)
         Path(self.get('runs_dir')).mkdir(parents=True, exist_ok=True)
+
+    def setup_writer(self, output_root=None):
+        if self.summarizer_ready:
+            return
+        self.summarizer_ready = True
+        self.setup_output_directories()
         self.set('writer', SummaryWriter(log_dir=f'{self.get("runs_dir")}/{self.get(constants.TRAINER_NAME)}'))
+
+    def save_checkpoint(self, output_path=None):
+        output_path = (output_path or self.get(
+            'check_point_saving_dir')) + f'/{self.get(constants.TRAINER_NAME)}-E{self.get("epoch")}'
+        Path(output_path).mkdir(parents=True, exist_ok=True)
+        self.get('drmade').save(output_path)
+        torch.save(self.checkpoint_dict(), output_path + f'/trainer_checkpoint.pth')
+
+    def load_checkpoint(self, path=None, checkpoint=None):
+        assert path is not None or checkpoint is not None, 'missing checkpoint source (path/checkpoint_dict)'
+        checkpoint = checkpoint or torch.load(path)
+        drmade = DRMADE.load_from_checkpoint(checkpoint=checkpoint['models']['drmade'])
+        self.__init__(hparams=checkpoint.get(constants.HPARAMS_DICT, None), drmade=drmade)
+        drmade = drmade.to(self.get(constants.DEVICE))
+        drmade.encoder = drmade.encoder.to(self.get(constants.DEVICE))
+        drmade.decoder = drmade.decoder.to(self.get(constants.DEVICE))
+        drmade.made = drmade.made.to(self.get(constants.DEVICE))
+        for name, state_dict in checkpoint.get('schedulers', dict()).items():
+            self.schedulers_list[self.get(f'{constants.SCHEDULER_PREFIX}{name}/index')].load_state_dict(state_dict)
+        for name, state_dict in checkpoint.get('optimizers', dict()).items():
+            self.optimizers_list[self.get(f'{constants.OPTIMIZER_PREFIX}{name}/index')].load_state_dict(state_dict)
 
     def save_model(self, output_path=None):
         output_path = output_path or self.get('check_point_saving_dir')
@@ -285,6 +314,7 @@ class DRMADETrainer(Trainer):
 
     def submit_embedding(self, data_loader='test_loader'):
         self.setup_writer()  # in case it hasn't already been setup
+        self.get('drmade').eval()
 
         log_prob, decoder_loss, features, labels, images, reconstruction = self._evaluate_loop(
             self.get(data_loader),
@@ -295,6 +325,7 @@ class DRMADETrainer(Trainer):
             global_step=self.get(constants.EPOCH),
             tag=self.get(constants.TRAINER_NAME))
         self.get('writer').flush()
+        self.get('drmade').train()
 
     def train(self):
         self.setup_writer()  # in case it hasn't already been setup

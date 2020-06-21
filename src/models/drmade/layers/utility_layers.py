@@ -28,3 +28,12 @@ class MaskedLinear(nn.Linear):
 
     def forward(self, input):
         return F.linear(input, self.mask * self.weight, self.bias)
+
+
+class View(nn.Module):
+    def __init__(self, shape=(-1,)):
+        super().__init__()
+        self.shape = shape
+
+    def forward(self, x):
+        return x.view(x.shape[0], *self.shape)

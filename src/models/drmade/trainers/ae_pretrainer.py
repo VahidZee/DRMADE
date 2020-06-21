@@ -10,7 +10,10 @@ from src.models.drmade.trainers.base_trainer import DRMADETrainer
 
 
 class RobustAutoEncoderPreTrainer(DRMADETrainer):
-    def __init__(self, hparams=None, name=None, model=None, device=None, ):
+    def __init__(self, hparams=None, name=None, model=None, device=None, checkpoint_path=None):
+        if checkpoint_path:
+            self.load_checkpoint(checkpoint_path)
+            return
         super(RobustAutoEncoderPreTrainer, self).__init__(hparams, name, model, device, )
 
         hparams = self.get(constants.HPARAMS_DICT)

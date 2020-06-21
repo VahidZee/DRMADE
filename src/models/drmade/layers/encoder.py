@@ -4,39 +4,41 @@ import torch
 import torch.nn as nn
 
 import src.models.drmade.config as model_config
+from .utility_layers import View
+from collections.abc import Iterable
+import dill
 
 
 class Encoder(nn.Module):
     def __init__(
             self,
-            num_channels,
+            input_shape,
             latent_size,
-            input_size,
-            num_layers,
+            num_layers=1,
+            name=None,
+            model_generator_function=None,
             bias=model_config.encoder_use_bias,
             bn_affine=model_config.encoder_bn_affine,
             bn_eps=model_config.encoder_bn_eps,
             bn_latent=model_config.encoder_bn_latent,
             layers_activation=model_config.encoder_layers_activation,
             latent_activation=model_config.encoder_latent_activation,
-            name=None,
+            **kwargs
     ):
         super(Encoder, self).__init__()
-        assert num_layers > 0, 'non-positive number of layers'
-        latent_image_size = input_size // (2 ** num_layers)
-
-        assert latent_image_size > 0, 'number of layers is too large'
-        assert latent_activation in ['', 'tanh', 'leaky_relu', 'sigmoid'], 'unknown latent activation'
-        assert layers_activation in ['relu', 'elu', 'leaky_relu'], 'non-positive number of layers'
-
+        self.input_shape = input_shape
         self.num_layers = num_layers
-        self.num_input_channels = num_channels
+        self.num_input_channels = input_shape[0]
         self.latent_size = latent_size
         self.bn_latent = bn_latent
         self.latent_activation = latent_activation
         self.layers_activation = layers_activation
+        self.input_size = min(input_shape[1], input_shape[2])
+        self.bias = bias
+        self.bn_affine = bn_affine
+        self.bn_eps = bn_eps
 
-        self.name = 'Encoder{}{}{}-{}{}{}'.format(
+        self.name = name or 'Encoder{}{}{}-{}{}{}'.format(
             self.num_layers,
             self.layers_activation,
             'bn_affine' if bn_affine else '',
@@ -44,56 +46,82 @@ class Encoder(nn.Module):
             self.latent_activation,
             'bn' if self.bn_latent else '',
         ) if not name else name
-
-        self.conv_layers = []
-        self.batch_norms = []
-        self.layers = []
-        for i in range(self.num_layers):
-            self.conv_layers.append(
-                nn.Conv2d(32 * (2 ** (i - 1)) if i else self.num_input_channels, 32 * (2 ** i), 5, bias=bias,
-                          padding=2))
-            if self.layers_activation == 'elu':
-                nn.init.xavier_uniform_(self.conv_layers[i].weight)
-            else:
-                nn.init.xavier_uniform_(self.conv_layers[i].weight, nn.init.calculate_gain(self.layers_activation))
-            self.layers.append(self.conv_layers[i])
-
-            self.batch_norms.append(nn.BatchNorm2d(32 * (2 ** i), eps=bn_eps, affine=bn_affine))
-            self.layers.append(self.batch_norms[i])
-            if self.layers_activation == 'leaky_relu':
-                self.layers.append(nn.LeakyReLU())
-            if self.layers_activation == 'elu':
-                self.layers.append(nn.ELU())
-            if self.layers_activation == 'relu':
-                self.layers.append(nn.ReLU())
-            self.layers.append(nn.MaxPool2d(2, 2))
-
-        self.convs = nn.Sequential(*self.layers)
-
-        self.fc1 = nn.Linear(32 * (2 ** (num_layers - 1)) * (latent_image_size ** 2), self.latent_size, bias=bias)
-        if not self.latent_activation and self.latent_activation:
-            nn.init.xavier_uniform_(self.fc1.weight, nn.init.calculate_gain(self.latent_activation))
+        self.model_generator_function = model_generator_function
 
         self.output_limits = None
-        self.activate_latent = (lambda x: x)
+        self.activate_latent = None
+        if model_generator_function is not None:
+            self.model, name = model_generator_function(self)
+            self.name = name or self.name
+            return
+        self.model = nn.Sequential()
+
+        assert num_layers > 0, 'non-positive number of layers'
+        latent_image_size = self.input_size // (2 ** num_layers)
+
+        assert latent_image_size > 0, 'number of layers is too large'
+        assert latent_activation in ['', 'tanh', 'leaky_relu', 'sigmoid'], 'unknown latent activation'
+        assert layers_activation in ['relu', 'elu', 'leaky_relu'], 'non-positive number of layers'
+
+        # convolutional layers
+        self.conv_layers = []
+        for i in range(self.num_layers):
+            layer = nn.Sequential()
+            conv = nn.Conv2d(32 * (2 ** (i - 1)) if i else self.num_input_channels, 32 * (2 ** i), 5, bias=bias,
+                             padding=2)
+            if self.layers_activation == 'elu':
+                nn.init.xavier_uniform_(conv.weight)
+            else:
+                nn.init.xavier_uniform_(conv.weight, nn.init.calculate_gain(self.layers_activation))
+            layer.add_module('conv', conv)
+            layer.add_module('batch_norm', nn.BatchNorm2d(32 * (2 ** i), eps=bn_eps, affine=bn_affine))
+
+            activation = None
+            if self.layers_activation == 'leaky_relu':
+                activation = nn.LeakyReLU()
+            if self.layers_activation == 'elu':
+                activation = nn.ELU()
+            if self.layers_activation == 'relu':
+                activation = nn.ReLU()
+            layer.add_module('activation', activation)
+            layer.add_module('pool', nn.MaxPool2d(2, 2))
+            self.conv_layers.append(layer)
+
+            self.model.add_module(f'layer{i}', layer)
+
+        self.model.add_module('flatten', View())
+
+        # fully connected layer
+        self.fc = []
+        fc_block = nn.Sequential()
+        fc = nn.Linear(32 * (2 ** (num_layers - 1)) * (latent_image_size ** 2), self.latent_size, bias=bias)
+        if not self.latent_activation and self.latent_activation:
+            nn.init.xavier_uniform_(fc.weight, nn.init.calculate_gain(self.latent_activation))
+        self.fc.append(fc)
+        fc_block.add_module('fc', fc)
+
+        # fully connected activation
         if self.latent_activation == 'tanh':
             self.output_limits = (-1, 1.)
-            self.activate_latent = (lambda x: torch.tanh(x))
+            self.activate_latent = torch.nn.Tanh()
         elif self.activate_latent == 'leaky_relu':
-            self.activate_latent = (lambda x: torch.nn.functional.leaky_relu(x))
+            self.activate_latent = torch.nn.LeakyReLU()
         elif self.activate_latent == 'sigmoid':
-            self.activate_latent = (lambda x: torch.nn.functional.sigmoid(x))
+            self.activate_latent = torch.nn.Sigmoid()
             self.output_limits = (0.,)
-        self.latent_bn = nn.BatchNorm1d(self.latent_size, eps=bn_eps, affine=bn_affine) if self.bn_latent else lambda \
-                x: x
+        if self.activate_latent is not None:
+            self.fc.append(self.activate_latent)
+            fc_block.add_module('activation', self.activate_latent)
+
+        # fully connected batch_norm
+        self.latent_bn = nn.BatchNorm1d(self.latent_size, eps=bn_eps, affine=bn_affine) if self.bn_latent else None
+        if self.bn_latent:
+            self.fc.append(self.latent_bn)
+            fc_block.add_module('batch_norm', self.latent_bn)
+        self.model.add_module('fc', fc_block)
 
     def forward(self, x):
-        x = self.convs(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc1(x)
-        x = self.latent_bn(x)
-        x = self.activate_latent(x)
-        return x
+        return self.model(x)
 
     def latent_cor_regularization(self, features):
         norm_features = features / ((features ** 2).sum(1, keepdim=True) ** 0.5).repeat(1, self.latent_size)
@@ -120,16 +148,65 @@ class Encoder(nn.Module):
     def latent_var_regularization(self, features):
         return torch.sum(((features - features.sum(1, keepdim=True) / self.latent_size) ** 2).sum(1) / self.latent_size)
 
-    def load(self, path, device=None):
-        params = torch.load(path) if not device else torch.load(path, map_location=device)
+    @staticmethod
+    def load_from_checkpoint(path=None, checkpoint=None):
+        assert path is not None or checkpoint is not None, 'missing checkpoint source (path/checkpoint_dict)'
+        checkpoint = checkpoint or torch.load(path)
+        state_dict = checkpoint['state_dict']
+        checkpoint['model_generator_function'] = dill.loads(checkpoint['model_generator_function'])
+        instance = Encoder(**checkpoint)
+        instance.load_state_dict(state_dict, strict=True)
+        print('encoder loaded from', path or 'checkpoint_dict')
+        return instance
 
-        added = 0
-        for name, param in params.items():
-            if name in self.state_dict().keys():
-                try:
-                    self.state_dict()[name].copy_(param)
-                    added += 1
-                except Exception as e:
-                    print(e)
-                    pass
-        print('loaded {:.2f}% of params encoder'.format(100 * added / float(len(self.state_dict().keys()))))
+    def checkpoint_dict(self):
+        return {
+            'state_dict': self.state_dict(),
+            'input_shape': self.input_shape,
+            'bias': self.bias,
+            'bn_affine': self.bn_affine,
+            'bn_eps': self.bn_eps,
+            'model_generator_function': dill.dumps(self.model_generator_function),
+            'layers_activation': self.layers_activation,
+            'latent_activation': self.latent_activation,
+            'name': self.name,
+            'num_layers': self.num_layers,
+            'latent_size': self.latent_size,
+            'bn_latent': self.bn_latent,
+        }
+
+    def freeze(self, instruction, verbose=True):
+        if isinstance(instruction, bool) and instruction:
+            if verbose:
+                print('freezing all of encoder')
+            for par in self.parameters():
+                par.requires_grad = False
+            return True, 'freezed'
+
+        # todo: O(n2) could be optimized
+        if isinstance(instruction, dict) and instruction:
+            if verbose:
+                print('freezing encoder')
+            freeze_pars = []
+            state = 'freezed[{}]'.format(','.join(
+                f'{key}' if item is None else '{}[{}]'.format(key, ",".join(str(i) for i in item)) for key, item in
+                instruction.items()))
+
+            for key, item in instruction.items():
+                if isinstance(item, Iterable):
+                    for value in item:
+                        freeze_pars.append(f'{key}{value}')
+                else:
+                    freeze_pars.append(str(key))
+            pars_count = counter = 0
+            for phrase in freeze_pars:
+                pars_count = 0
+                for name, par in self.named_parameters():
+                    pars_count += 1
+                    if phrase in name:
+                        if verbose:
+                            print('\tfroze', phrase, '-', name)
+                        par.requires_grad = False
+                        counter += 1
+            return counter == pars_count, state
+        return False, ''

@@ -12,7 +12,13 @@ made_natural_ordering = True
 num_mix = 5
 distribution = Normal
 num_dist_parameters = 2
-parameters_transform = [lambda x: x, torch.exp]  # mean, std
+
+
+def parameters_transform():
+    import torch
+    return [lambda x: x, torch.exp]  # mean, std
+
+
 paramteres_min_value = [0.0, 0.5]
 parameters_regularization = [lambda x: 0, lambda x: torch.sum(1 / x)]
 

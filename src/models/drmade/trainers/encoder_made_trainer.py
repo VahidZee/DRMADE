@@ -10,8 +10,11 @@ from src.models.drmade.trainers.base_trainer import DRMADETrainer
 
 
 class RobustEncoderMadeTrainer(DRMADETrainer):
-    def __init__(self, hparams: dict = None, name=None, model=None, device=None, ):
-        super().__init__(hparams, name, model, device)
+    def __init__(self, hparams: dict = None, name=None, drmade=None, device=None, checkpoint_path=None):
+        if checkpoint_path:
+            self.load_checkpoint(checkpoint_path)
+            return
+        super().__init__(hparams=hparams, name=name, drmade=drmade, device=device)
 
         hparams = self.get(constants.HPARAMS_DICT)
 
@@ -45,62 +48,14 @@ class RobustEncoderMadeTrainer(DRMADETrainer):
             parameter.requires_grad = True
 
         freeze_encoder = hparams.get('freeze_encoder', False)
-        made_only = False
-        freeze_encoder_name = ''
-        if isinstance(freeze_encoder, bool) and freeze_encoder:
-            made_only = True
-            print('freezing encoder')
+        made_only, freeze_encoder_name = self.get('drmade').encoder.freeze(freeze_encoder)
+        if made_only:
             freeze_encoder_name = 'freezed'
-
             # turning off unnecessary evaluational functions
             hparams['track_extreme_reconstructions'] = hparams.get('track_extreme_reconstructions', 0)
             hparams['embedding_interval'] = hparams.get('embedding_interval', 0)
             hparams['submit_latent_interval'] = hparams.get('submit_latent_interval', 0)
             hparams['track_jacobian_interval'] = hparams.get('track_jacobian_interval', 0)
-
-            for parameter in self.get('drmade').encoder.parameters():
-                parameter.requires_grad = False
-
-        if isinstance(freeze_encoder, dict):
-            print(freeze_encoder)
-            made_only = False
-            conv = freeze_encoder.get('conv', tuple())
-            batch_norm = freeze_encoder.get('batch_norm', conv)
-            if 'batch_norm' in freeze_encoder:
-                freeze_encoder_name = '{}{}'.format(
-                    'conv[{}]'.format(','.join(str(i) for i in conv)) if conv else '',
-                    'bn[{}]'.format(','.join(str(i) for i in batch_norm))) if batch_norm else ''
-            else:
-                freeze_encoder_name = 'layer[{}]'.format(','.join(str(i) for i in conv)) if conv else ''
-            fc = freeze_encoder.get('fc', False)
-            fc_bn = freeze_encoder.get('fc_bn', fc)
-            freeze_encoder_name = '{}{}{}'.format(
-                freeze_encoder_name, 'fc' if fc else '',
-                'fc_bn' if fc_bn and self.get('drmade').encoder.bn_latent else '')
-
-            print('freezing encoder')
-            if conv:
-                print('\tconv layer: ', end='')
-                for i in conv:
-                    print(i, end=' ')
-                    for parameter in self.get('drmade').encoder.conv_layers[i].parameters():
-                        parameter.requires_grad = False
-                print()
-            if batch_norm:
-                print('\tbatch_norm: ', end='')
-                for i in batch_norm:
-                    print(i, end=' ')
-                    for parameter in self.get('drmade').encoder.batch_norms[i].parameters():
-                        parameter.requires_grad = False
-                print()
-            if fc:
-                print('\tlatent')
-                for parameter in self.get('drmade').encoder.fc1.parameters():
-                    parameter.requires_grad = False
-            if fc_bn and self.get('drmade').encoder.bn_latent:
-                print('\tlatent bn')
-                for parameter in self.get('drmade').encoder.latent_bn.parameters():
-                    parameter.requires_grad = False
 
         print('unfreezing made')
         for parameter in self.get('drmade').made.parameters():
@@ -132,7 +87,7 @@ class RobustEncoderMadeTrainer(DRMADETrainer):
                 encoder_optimizer, lr_lambda=lr_multiplicative_function, last_epoch=-1)
             self.add_scheduler('encoder', encoder_scheduler)
 
-        # iterative training
+        # iterative trainingفهم
         iterative = hparams.get('iterative', False)
         assert not iterative or (iterative and not made_only), \
             'cannot perform iterative training with fixed encoder'

@@ -4,7 +4,7 @@ from pathlib import Path
 
 # training
 input_limits = (-1., 1.)
-dataset = datasets.CIFAR10
+dataset = datasets.MNIST
 normal_classes = [1]
 input_rescaling = lambda x: (x - .5) * 2.
 input_rescaling_inv = lambda x: x * .5 + .5

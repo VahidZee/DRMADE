@@ -2,3 +2,4 @@ pillow
 torch
 numpy
 torchvision
+dill
