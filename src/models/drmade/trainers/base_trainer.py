@@ -154,7 +154,7 @@ class DRMADETrainer(Trainer):
 
     def save_model(self, output_path=None):
         output_path = output_path or self.get('check_point_saving_dir')
-        self.get('drmade').save(output_path + f'/{self.get("name")}-E{self.get("epoch")}.pth')
+        self.get('drmade').save(output_path)
 
     def _evaluate_loop(self, data_loader, record_input_images=False, record_reconstructions=False):
         with torch.no_grad():
@@ -364,7 +364,7 @@ class DRMADETrainer(Trainer):
                 self.submit_embedding()
 
             if save_interval and (epoch + 1) % save_interval == 0:
-                self.save_model()
+                self.save_checkpoint()
 
             for loop in self.loops_list:
                 active = loop.is_active(self.context)
