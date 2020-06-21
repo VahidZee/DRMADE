@@ -197,15 +197,16 @@ class DRMADETrainer(Trainer):
         input_images = input_images.cpu()
         reconstructed_images = reconstructed_images.cpu()
         for i, index in enumerate(sorted_indexes[:num_cases]):
-            result_images[i * 3] = input_images[index]
-            result_images[i * 3 + 1] = reconstructed_images[index]
+            result_images[i * 3] = config.input_rescaling_inv(input_images[index])
+            result_images[i * 3 + 1] = config.input_rescaling_inv(reconstructed_images[index])
             result_images[i * 3 + 2] = distance_hitmap[index]
+
         self.get('writer').add_images(f'best_reconstruction/{title}', result_images, self.get(constants.EPOCH))
 
         result_images = np.empty((num_cases * 3, input_images.shape[1], input_images.shape[2], input_images.shape[3]))
         for i, index in enumerate(sorted_indexes[-1:-(num_cases + 1):-1]):
-            result_images[i * 3] = input_images[index]
-            result_images[i * 3 + 1] = reconstructed_images[index]
+            result_images[i * 3] = config.input_rescaling_inv(input_images[index])
+            result_images[i * 3 + 1] = config.input_rescaling_inv(reconstructed_images[index])
             result_images[i * 3 + 2] = distance_hitmap[index]
 
         self.get('writer').add_images(f'worst_reconstruction/{title}', result_images, self.get(constants.EPOCH))
@@ -304,8 +305,14 @@ class DRMADETrainer(Trainer):
                            inputs[i].view(-1, input_shape[0], input_shape[1], input_shape[2]))[0, :, 0]
             mean += jac / count
         total_mean = mean.mean(dim=0, keepdim=True)
-        self.get('writer').add_images(f'jacobian/latent_input/{title}', mean, self.get(constants.EPOCH))
-        self.get('writer').add_images(f'jacobian/latent_input/mean/{title}', total_mean, self.get(constants.EPOCH))
+        mean_picture = mean - mean.min()
+        mean_picture = mean_picture / mean_picture.max()
+        if not torch.isnan(mean_picture).sum():
+            self.get('writer').add_images(f'jacobian/latent_input/{title}', mean_picture, self.get(constants.EPOCH))
+        total_mean_picture = total_mean - total_mean.min()
+        total_mean_picture = total_mean_picture / total_mean.max()
+        if not torch.isnan(mean_picture).sum():
+            self.get('writer').add_images(f'jacobian/latent_input/mean/{title}', total_mean_picture, self.get(constants.EPOCH))
         # self.get('writer').add_scalars(
         #     f'jacobian_norm/latent_input/{title}', {f'{i}': mean[i].norm() for i in range(mean.shape[0])},
         #     self.get(constants.EPOCH))
@@ -321,7 +328,7 @@ class DRMADETrainer(Trainer):
             record_input_images=True,
         )
         self.get('writer').add_embedding(
-            features, metadata=labels, label_img=images,
+            features, metadata=labels, label_img=config.input_rescaling_inv(images),
             global_step=self.get(constants.EPOCH),
             tag=self.get(constants.TRAINER_NAME))
         self.get('writer').flush()
