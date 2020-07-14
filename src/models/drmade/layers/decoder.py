@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 import src.models.drmade.config as model_config
-from .utility_layers import Interpolate, View
+from src.models.drmade.layers.utility_layers import Interpolate, View
 import dill
 
 

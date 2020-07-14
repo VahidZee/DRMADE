@@ -1,3 +1,3 @@
-from .encoder import Encoder
-from .decoder import Decoder
-from .made import MADE
+from src.models.drmade.layers.encoder import Encoder
+from src.models.drmade.layers.decoder import Decoder
+from src.models.drmade.layers.made import MADE
