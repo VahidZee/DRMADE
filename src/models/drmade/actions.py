@@ -67,7 +67,7 @@ class EncoderDecoderForwardPass(EncoderAction):
         reconstruction = context['drmade'].decoder(latent)
         if not self.cross_entropy:
             return context['drmade'].decoder.distance(loop_data['inputs'], reconstruction).sum()
-        return torch.nn.F.binary_cross_entropy(reconstruction, inputs, reduction='sum')
+        return torch.nn.functional.binary_cross_entropy(reconstruction, inputs, reduction='sum')
 
 
 class KLDAction(EncoderAction):

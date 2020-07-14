@@ -12,6 +12,7 @@ import src.config as config
 from src.utils.train import Trainer
 import src.utils.train.constants as constants
 import src.models.drmade.config as model_config
+from torchvision import transforms
 
 
 class DRMADETrainer(Trainer):
