@@ -1,6 +1,7 @@
 from src.utils.train import Action
 from src.utils.train import constants
 import src.config as config
+import torch.nn.functional as F
 import torch
 
 
@@ -57,13 +58,29 @@ class EncoderAction(Action):
 
 
 class EncoderDecoderForwardPass(EncoderAction):
-    def __init__(self, name='', input_transform=None, latent_transform=None, encode=True, factor=1., active=True):
+    def __init__(self, name='', input_transform=None, latent_transform=None, encode=True, factor=1., active=True,
+                 cross_entropy=False):
         super(EncoderDecoderForwardPass, self).__init__(
             name, input_transform, latent_transform, encode=encode, factor=factor, active=active)
+        self.cross_entropy = cross_entropy
 
     def function(self, context, loop_data, inputs, latent, outputs, **kwargs):
         reconstruction = context['drmade'].decoder(latent)
-        return context['drmade'].decoder.distance(loop_data['inputs'], reconstruction).sum()
+        if not self.cross_entropy:
+            return context['drmade'].decoder.distance(loop_data['inputs'], reconstruction).sum()
+        return F.binary_cross_entropy(reconstruction, inputs, reduction='sum')
+
+
+class KLDAction(EncoderAction):
+    def __init__(self, name='', input_transform=None, latent_transform=None, encode=False, factor=1., active=True):
+        super(KLDAction, self).__init__(
+            name, input_transform, latent_transform, encode=encode, factor=factor, active=active)
+
+    def function(self, context, loop_data, inputs, latent, outputs, **kwargs):
+        latent = context['drmade'].encoder(inputs, raw=True)
+        mu = latent[:, :context['drmade'].encoder.latent_size]
+        log_var = latent[:, context['drmade'].encoder.latent_size:]
+        return -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
 
 
 class EncoderMadeForwardPass(EncoderAction):

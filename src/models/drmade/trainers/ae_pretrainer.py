@@ -72,6 +72,7 @@ class RobustAutoEncoderPreTrainer(DRMADETrainer):
 
         self.add_loop(RobustAEFeedLoop(
             name='train',
+            variational=self.get('drmade').encoder.variational,
             data_loader=self.context['train_loader'],
             device=self.context[constants.DEVICE],
             optimizers=('ae',),
@@ -81,6 +82,7 @@ class RobustAutoEncoderPreTrainer(DRMADETrainer):
 
         self.add_loop(RobustAEFeedLoop(
             name='validation',
+            variational=self.get('drmade').encoder.variational,
             data_loader=self.context['validation_loader'],
             device=self.context[constants.DEVICE],
             optimizers=tuple(),

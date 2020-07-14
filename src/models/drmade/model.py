@@ -28,6 +28,7 @@ class DRMADE(nn.Module):
             encoder_latent_activation=model_config.encoder_latent_activation,
             encoder_latent_bn=model_config.encoder_bn_latent,
             encoder_use_bias=model_config.encoder_use_bias,
+            encoder_variational=False,
             encoder_generator_function=None,
             decoder=None,
             decoder_num_layers=model_config.decoder_num_layers,
@@ -50,6 +51,7 @@ class DRMADE(nn.Module):
             latent_activation=encoder_latent_activation,
             bn_latent=encoder_latent_bn,
             model_generator_function=encoder_generator_function,
+            variational=encoder_variational,
             bias=encoder_use_bias
         )
         self.decoder = decoder or Decoder(

@@ -1,5 +1,5 @@
 from src.utils.train import Loop
-from .actions import EncoderMadeForwardPass, EncoderDecoderForwardPass
+from .actions import EncoderMadeForwardPass, EncoderDecoderForwardPass, KLDAction
 from .input_transforms import PGDAttackAction, Encode
 import src.models.drmade.config as model_config
 import src.config as config
@@ -7,11 +7,11 @@ import src.config as config
 
 class RobustAEFeedLoop(Loop):
     def __init__(self, name, data_loader, device, optimizers=None, pgd_input=None, pgd_latent=None, interval=1,
-                 log_interval=0, active=None):
+                 log_interval=0, active=None, variational=False):
         pgd_input = pgd_input or dict()
         pgd_latent = pgd_latent or dict()
         input_attacker = PGDAttackAction(
-            EncoderDecoderForwardPass('encoder_decoder'),
+            EncoderDecoderForwardPass('encoder_decoder', cross_entropy=variational),
             eps=pgd_input.get('eps', model_config.pretrain_ae_pgd_eps),
             iterations=pgd_input.get('iterations', model_config.pretrain_ae_pgd_iterations),
             randomize=pgd_input.get('randomize', model_config.pretrain_ae_pgd_randomize),
@@ -20,7 +20,7 @@ class RobustAEFeedLoop(Loop):
         )
         encoder_transform = Encode('encode-pgd-input', input_attacker.name)
         latent_attacker = PGDAttackAction(
-            EncoderDecoderForwardPass('decoder', encode=False),
+            EncoderDecoderForwardPass('decoder', encode=False, cross_entropy=variational),
             eps=pgd_latent.get('eps', model_config.pretrain_ae_latent_pgd_eps),
             iterations=pgd_latent.get('iterations', model_config.pretrain_ae_latent_pgd_iterations),
             randomize=pgd_latent.get('randomize', model_config.pretrain_ae_latent_pgd_randomize),
@@ -36,7 +36,10 @@ class RobustAEFeedLoop(Loop):
             name, data_loader, device,
             input_transforms=(input_attacker, encoder_transform, latent_attacker),
             loss_actions=(
-                EncoderDecoderForwardPass('L2-reconstruction', latent_transform=latent_attacker.name, encode=False),
+                EncoderDecoderForwardPass(
+                    'reconstruction/L2' if not variational else 'reconstruction/BCE',
+                    latent_transform=latent_attacker.name, encode=False, cross_entropy=variational),
+                KLDAction('kld', active=variational, latent_transform=input_attacker.name, encode=False)
             ),
             optimizers=optimizers,
             log_interval=log_interval,

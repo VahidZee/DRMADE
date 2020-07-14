@@ -100,10 +100,11 @@ class Decoder(nn.Module):
                 if self.output_activation == 'tanh':
                     self.output_limits = (-1., 1.)
                     activation = nn.Tanh()
-                if self.layers_activation == 'sigmoid':
+                if self.output_activation == 'sigmoid':
                     self.output_limits = (0., 1.)
                     activation = nn.Sigmoid()
-                layer.add_module('activation', activation)
+                if activation is not None:
+                    layer.add_module('activation', activation)
             self.deconv_layers.append(deconv)
             self.model.add_module(f'layer{i}', layer)
 

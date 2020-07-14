@@ -3,7 +3,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.autograd.functional import jacobian
 from pathlib import Path
 import numpy as np
-
+from torchvision import transforms
 from sklearn.metrics import roc_auc_score
 from src.utils.data import DatasetSelection
 from src.models.drmade.model import DRMADE, Encoder, Decoder, MADE
@@ -32,16 +32,25 @@ class DRMADETrainer(Trainer):
         context[constants.DEVICE] = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("device:", context[constants.DEVICE])
 
+        context['input_limit'] = hparams.get('input_limit', config.input_limits)
+        context['input_rescale_inv'] = hparams.get('input_rescale_inv', config.input_rescaling_inv)
+        context['input_rescale'] = hparams.get('input_rescale', config.input_rescaling)
+        data_transform = hparams.get(
+            'data_transform', transforms.Compose([transforms.ToTensor(), context['input_rescale']]))
         print('loading training data')
+        train_data_transform = hparams.get('train_data_transform', data_transform)
         context['train_data'] = DatasetSelection(
             hparams.get('dataset', config.dataset),
-            classes=context['normal_classes'], train=True)
+            classes=context['normal_classes'], train=True, transform=train_data_transform)
         print('loading validation data')
+        validation_data_transform = hparams.get('validation_data_transform', data_transform)
         context['validation_data'] = DatasetSelection(
             hparams.get('dataset', config.dataset),
-            classes=context['normal_classes'], train=False)
+            classes=context['normal_classes'], train=False, transform=validation_data_transform)
         print('loading test data')
-        context['test_data'] = DatasetSelection(hparams.get('dataset', config.dataset), train=False)
+        test_data_transform = hparams.get('test_data_transform', data_transform)
+        context['test_data'] = DatasetSelection(
+            hparams.get('dataset', config.dataset), train=False, transform=test_data_transform)
 
         context['input_shape'] = context['train_data'].input_shape()
 
@@ -92,6 +101,7 @@ class DRMADETrainer(Trainer):
             encoder_layers_activation=hparams.get('encoder_layers_activation', model_config.encoder_layers_activation),
             encoder_latent_activation=hparams.get('encoder_latent_activation', model_config.encoder_latent_activation),
             encoder_latent_bn=hparams.get('encoder_bn_latent', model_config.encoder_bn_latent),
+            encoder_variational=hparams.get('encoder_variational', model_config.encoder_variational),
             encoder_use_bias=hparams.get('encoder_use_bias', model_config.encoder_use_bias),
             encoder_generator_function=hparams.get('encoder_generator_function', None),
             decoder=decoder,
@@ -199,17 +209,18 @@ class DRMADETrainer(Trainer):
         result_images = np.empty((num_cases * 3, input_images.shape[1], input_images.shape[2], input_images.shape[3]))
         input_images = input_images.cpu()
         reconstructed_images = reconstructed_images.cpu()
+
         for i, index in enumerate(sorted_indexes[:num_cases]):
-            result_images[i * 3] = config.input_rescaling_inv(input_images[index])
-            result_images[i * 3 + 1] = config.input_rescaling_inv(reconstructed_images[index])
+            result_images[i * 3] = self.get('input_rescale_inv')(input_images[index])
+            result_images[i * 3 + 1] = self.get('input_rescale_inv')(reconstructed_images[index])
             result_images[i * 3 + 2] = distance_hitmap[index]
 
         self.get('writer').add_images(f'best_reconstruction/{title}', result_images, self.get(constants.EPOCH))
 
         result_images = np.empty((num_cases * 3, input_images.shape[1], input_images.shape[2], input_images.shape[3]))
         for i, index in enumerate(sorted_indexes[-1:-(num_cases + 1):-1]):
-            result_images[i * 3] = config.input_rescaling_inv(input_images[index])
-            result_images[i * 3 + 1] = config.input_rescaling_inv(reconstructed_images[index])
+            result_images[i * 3] = self.get('input_rescale_inv')(input_images[index])
+            result_images[i * 3 + 1] = self.get('input_rescale_inv')(reconstructed_images[index])
             result_images[i * 3 + 2] = distance_hitmap[index]
 
         self.get('writer').add_images(f'worst_reconstruction/{title}', result_images, self.get(constants.EPOCH))
@@ -323,16 +334,16 @@ class DRMADETrainer(Trainer):
         self.get('writer').add_scalar(
             f'jacobian_norm/latent_input/mean/{title}', total_mean.norm(), self.get(constants.EPOCH))
 
-    def submit_embedding(self, data_loader='test_loader'):
+    def submit_embedding(self, data_loader='test_loader', rescale_inv=None):
         self.setup_writer()  # in case it hasn't already been setup
         self.get('drmade').eval()
-
+        rescale_inv = rescale_inv or self.get('input_rescale_inv')
         log_prob, decoder_loss, features, labels, images, reconstruction = self._evaluate_loop(
-            self.get(data_loader),
+            data_loader if not isinstance(data_loader, str) else self.get(data_loader),
             record_input_images=True,
         )
         self.get('writer').add_embedding(
-            features, metadata=labels, label_img=config.input_rescaling_inv(images),
+            features, metadata=labels, label_img=rescale_inv(images),
             global_step=self.get(constants.EPOCH),
             tag=self.get(constants.TRAINER_NAME))
         self.get('writer').flush()

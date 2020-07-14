@@ -26,6 +26,7 @@ encoder_use_bias = False
 encoder_bn_affine = False
 encoder_bn_eps = 1e-4
 encoder_bn_latent = False
+encoder_variational = False
 encoder_num_layers = 2
 encoder_latent_activation = ''  # '', tanh, leaky_relu
 encoder_layers_activation = 'elu'  # leaky_relu, elu, relu

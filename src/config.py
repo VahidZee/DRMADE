@@ -1,13 +1,14 @@
 import torch
-from torchvision import datasets
+from torchvision import datasets, transforms
 from pathlib import Path
 
 # training
-input_limits = (-1., 1.)
 dataset = datasets.MNIST
 normal_classes = [1]
 input_rescaling = lambda x: (x - .5) * 2.
 input_rescaling_inv = lambda x: x * .5 + .5
+input_limits = (input_rescaling(0.), input_rescaling(1.))
+default_transform = transforms.Compose([transforms.ToTensor(), input_rescaling])
 
 # evaluation
 positive_is_anomaly = False

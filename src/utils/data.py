@@ -1,9 +1,7 @@
 from torch.utils.data import Dataset, Subset, DataLoader
-from torchvision import datasets, transforms
 import src.config as config
 import numpy as np
 
-default_transform = transforms.Compose([transforms.ToTensor(), config.input_rescaling])
 
 
 class DatasetSelection(Dataset):
@@ -12,7 +10,7 @@ class DatasetSelection(Dataset):
                  root=config.data_dir,
                  train=True,
                  classes=None,
-                 transform=default_transform,
+                 transform=config.default_transform,
                  target_transform=lambda x: x,
                  download=True,
                  return_indexes=False

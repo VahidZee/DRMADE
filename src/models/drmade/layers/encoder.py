@@ -23,6 +23,7 @@ class Encoder(nn.Module):
             bn_latent=model_config.encoder_bn_latent,
             layers_activation=model_config.encoder_layers_activation,
             latent_activation=model_config.encoder_latent_activation,
+            variational=False,
             **kwargs
     ):
         super(Encoder, self).__init__()
@@ -37,8 +38,10 @@ class Encoder(nn.Module):
         self.bias = bias
         self.bn_affine = bn_affine
         self.bn_eps = bn_eps
+        self.variational = variational
 
-        self.name = name or 'Encoder{}{}{}-{}{}{}{}'.format(
+        self.name = name or '{}Encoder{}{}{}-{}{}{}{}'.format(
+            'var' if self.variational else '',
             self.num_layers,
             self.layers_activation,
             'bn_affine' if bn_affine else '',
@@ -95,7 +98,8 @@ class Encoder(nn.Module):
         # fully connected layer
         self.fc = []
         fc_block = nn.Sequential()
-        fc = nn.Linear(32 * (2 ** (num_layers - 1)) * (latent_image_size ** 2), self.latent_size, bias=bias)
+        fc = nn.Linear(32 * (2 ** (num_layers - 1)) * (latent_image_size ** 2),
+                       self.latent_size * 2 if self.variational else self.latent_size, bias=bias)
         if not self.latent_activation and self.latent_activation:
             nn.init.xavier_uniform_(fc.weight, nn.init.calculate_gain(self.latent_activation))
         self.fc.append(fc)
@@ -121,8 +125,14 @@ class Encoder(nn.Module):
             fc_block.add_module('batch_norm', self.latent_bn)
         self.model.add_module('fc', fc_block)
 
-    def forward(self, x):
-        return self.model(x)
+    def forward(self, x: torch.Tensor, raw=False):
+        latent = self.model(x)
+        if not self.variational or raw:
+            return latent
+        else:
+            # first half of latent vector is mu, second half is logvar
+            return torch.exp(0.5 * latent[:, self.latent_size:]) * torch.rand(
+                x.shape[0], self.latent_size, device=x.device) + latent[:, :self.latent_size]
 
     def latent_cor_regularization(self, features):
         norm_features = features / ((features ** 2).sum(1, keepdim=True) ** 0.5).repeat(1, self.latent_size)
@@ -174,6 +184,7 @@ class Encoder(nn.Module):
             'num_layers': self.num_layers,
             'latent_size': self.latent_size,
             'bn_latent': self.bn_latent,
+            'variational': self.variational,
         }
 
     def freeze(self, instruction, verbose=True):
