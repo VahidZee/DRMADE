@@ -1,6 +1,7 @@
-from src.utils.train.constants import *
+from .constants import *
 import torch
 import time
+
 
 
 class Loop:

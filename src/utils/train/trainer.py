@@ -1,4 +1,4 @@
-from src.utils.train.constants import *
+from .constants import *
 
 import tensorflow as tf
 import tensorboard as tb

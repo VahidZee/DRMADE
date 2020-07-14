@@ -3,7 +3,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.autograd.functional import jacobian
 from pathlib import Path
 import numpy as np
-from torchvision import transforms
+
 from sklearn.metrics import roc_auc_score
 from src.utils.data import DatasetSelection
 from src.models.drmade.model import DRMADE, Encoder, Decoder, MADE

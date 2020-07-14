@@ -1,7 +1,7 @@
 import torch
 import time
 from collections.abc import Iterable
-from src.utils.train.constants import *
+from .constants import *
 
 
 class InputTransform:

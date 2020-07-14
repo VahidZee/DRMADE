@@ -1,6 +1,6 @@
 import torch
 import time
-from src.utils.train.constants import *
+from .constants import *
 from collections.abc import Iterable
 
 

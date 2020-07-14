@@ -1,6 +1,3 @@
-import importlib
-
-
 def resnet_encoder_generator(resnet: str = 'resnet18', pretrained=False):
     def wrapper(encoder):
         import importlib

@@ -1,6 +1,6 @@
 from src.utils.train import Loop
-from src.models.drmade.actions import EncoderMadeForwardPass, EncoderDecoderForwardPass, KLDAction
-from src.models.drmade.input_transforms import PGDAttackAction, Encode
+from .actions import EncoderMadeForwardPass, EncoderDecoderForwardPass, KLDAction
+from .input_transforms import PGDAttackAction, Encode
 import src.models.drmade.config as model_config
 import src.config as config
 
